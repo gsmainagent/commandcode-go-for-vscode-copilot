@@ -15,7 +15,7 @@ export async function registerProvider(
 			provider.clearApiKey(),
 		),
 		vscode.commands.registerCommand('commandcode-copilot.refreshModels', () =>
-			provider.refreshModelPicker(),
+			provider.refreshModelsFromApi(),
 		),
 		vscode.lm.registerLanguageModelChatProvider('commandcode', provider),
 	);

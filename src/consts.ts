@@ -42,27 +42,61 @@ export const WELCOME_SHOWN_KEY = 'commandcode-copilot.welcomeShown';
 export const WALKTHROUGH_ID =
 	'hotrungnhan.command-code-go-for-github-copilot#commandcodeGettingStarted';
 
-// ---- Limits ----
-
-/** Chat Completions tools limit surfaced in error messages. */
-export const TOOLS_LIMIT = 128;
-
 // ---- Provider defaults ----
 
-/** Default Command Code Generate API base URL. */
+/** Default Command Code Generate API base URL (the `/alpha/generate` surface). */
 export const DEFAULT_BASE_URL = 'https://api.commandcode.ai/alpha';
+
+/**
+ * Default catalog base URL — the OpenAI-compatible surface that serves
+ * `GET /models`.
+ *
+ * This is deliberately NOT the Generate API host: `/alpha/*` exposes no model
+ * listing at all (every candidate route answers 404), so the catalog has to come
+ * from `/provider/v1`. It is consulted only for canonical model ids — the plan
+ * page supplies the list, names, and capabilities.
+ */
+export const DEFAULT_CATALOG_BASE_URL = 'https://api.commandcode.ai/provider/v1';
+
+/**
+ * Base URL of the plan documentation pages. The extension targets the Go plan
+ * only, so the slug is fixed rather than configurable.
+ *
+ * This page is the authoritative model list: it states what the plan includes,
+ * each model's display name and context window, and its capabilities in the
+ * `Caps` column (`Capabilities: Text input, Vision, Reasoning`). The API
+ * catalog spans every plan and cannot express any of that.
+ */
+export const DEFAULT_PLAN_BASE_URL = 'https://commandcode.ai/docs/plans';
+
+/**
+ * Base URL of the CLI reference pages, whose model table lists canonical ids
+ * (`moonshotai/Kimi-K3`) as the CLI itself addresses them.
+ *
+ * This is the supported id source on the Go plan. `/provider/v1/models` also
+ * serves ids, but the Provider API is documented as unavailable to Go
+ * subscribers and only its GET is ungated, so it cannot be relied on. Together
+ * with the compiled registry this page resolves all but one of the Go plan's
+ * models.
+ */
+export const DEFAULT_CLI_REFERENCE_BASE_URL = 'https://commandcode.ai/docs/reference/cli';
+
+/** The only plan this extension supports. */
+export const SUPPORTED_PLAN = 'go';
+
+/**
+ * Minutes before a stored catalog snapshot is refetched.
+ *
+ * Short enough that a newly listed model shows up within a work session without
+ * an extension update, long enough that repeat picker queries stay free.
+ */
+export const DEFAULT_CATALOG_REFRESH_MINUTES = 30;
 
 /**
  * Command Code's current CLI protocol version. The API requires a CLI-version
  * header even when the caller is this VS Code extension.
  */
 export const COMMAND_CODE_CLIENT_VERSION = '1.28.1';
-
-/** Sentinel thread ID accepted by the Generate API when VS Code provides none. */
-export const DEFAULT_THREAD_ID = '00000000-0000-0000-0000-000000000000';
-
-/** Generate API default used when the user has not configured a token cap. */
-export const DEFAULT_MAX_OUTPUT_TOKENS = 64_000;
 
 /** Vendor ID exposed to GitHub Copilot Chat. */
 export const VENDOR_ID = 'commandcode';

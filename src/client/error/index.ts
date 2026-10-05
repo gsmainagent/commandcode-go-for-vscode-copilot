@@ -212,8 +212,7 @@ function extractServerError(responseText: string): ServerErrorDetails {
 }
 
 function getRequestDiagnosticMessage(context: RequestErrorContext): string {
-	const model = context.request?.params.model;
-	return model ? `model=${model}` : 'model=<not-yet-built>';
+	return context.model ? `model=${context.model}` : 'model=<unknown>';
 }
 
 function getErrorActions(error: CommandCodeRequestError, urls: ErrorActionUrls): ErrorActionLink[] {

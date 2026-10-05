@@ -1,5 +1,3 @@
-import type { ChatRequest } from '../types';
-
 export interface ErrorActionUrls {
 	configureApiKey?: string;
 	showLogs?: string;
@@ -8,8 +6,15 @@ export interface ErrorActionUrls {
 }
 
 export interface RequestErrorContext {
+	/**
+	 * Base URL the request went to, for diagnostics.
+	 *
+	 * The upstream protocol is the vendored proxy's, so there is no request
+	 * envelope to carry here; the model name is passed on its own.
+	 */
 	baseUrl: string;
-	request?: ChatRequest;
+	/** Model being requested, when the failure is known to relate to one. */
+	model?: string;
 }
 
 export interface ErrorActionLink {

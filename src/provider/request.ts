@@ -1,38 +1,58 @@
 import vscode from 'vscode';
 import { AuthManager } from '../auth';
-import { CommandCodeClient, ZDR_HEADER } from '../client';
 import { getDebugLoggingEnabled, getMaxTokens, getZdrEnabled } from '../config';
-import { DEFAULT_MAX_OUTPUT_TOKENS } from '../consts';
 import { t } from '../i18n';
 import { logger } from '../logger';
-import type { ChatRequest, ChatTool, ModelDefinition, ThinkingEffort } from '../types';
-import {
-	convertMessages,
-	convertTools,
-	countMessageChars,
-	extractSystemMessages,
-	toGenerateMessages,
-	toGenerateTools,
-} from './convert';
-import { collectRequestConfig, getThreadId } from './context';
+import { outputCeilingFor } from '../output-ceiling';
+import type { ChatMessage, ChatTool, ModelDefinition, ThinkingEffort } from '../types';
+import type { OpenAITool, ProxyClientOptions, ProxyRequest } from '../client/proxy-client';
+import { convertMessages, convertTools, countMessageChars } from './convert';
 import { getConfiguredThinkingEffort, type ModelConfigurationOptions } from './models';
 
 export interface PreparedChatRequest {
-	client: CommandCodeClient;
-	request: ChatRequest;
-	totalRequestChars: number;
+	readonly proxy: ProxyClientOptions;
+	readonly request: ProxyRequest;
+	/** Character count of the conversation, used to calibrate tokens-per-char. */
+	readonly totalRequestChars: number;
 }
 
 export interface PrepareChatRequestOptions {
 	authManager: AuthManager;
+	/** Where the vendored proxy is listening, from `ensureProxy`. */
+	endpoint: { readonly baseUrl: string; readonly port: number };
 	modelInfo: vscode.LanguageModelChatInformation;
 	modelDefinition: ModelDefinition | undefined;
 	messages: readonly vscode.LanguageModelChatRequestMessage[];
 	options: vscode.ProvideLanguageModelChatResponseOptions;
 }
 
+/**
+ * Build an OpenAI-shaped request for the vendored proxy.
+ *
+ * ## Why this is OpenAI-shaped
+ *
+ * The proxy exposes `/v1/chat/completions`, so this is the wire format — not an
+ * intermediate step. The second conversion hop is gone: no `input_schema`, no
+ * `{ type: 'tool-call' }` parts, no envelope. What remains is one conversion,
+ * from VS Code's parts to OpenAI's.
+ *
+ * ## Where the request envelope comes from
+ *
+ * The proxy builds it. That is a compatibility requirement, not a shortcut: the
+ * upstream CLI always sends `config.workingDir`, while VS Code may run with no
+ * folder open at all, so a working directory has to be supplied by something. The
+ * proxy supplies a plausible one, and the same profile drives the device
+ * fingerprint — which is also what makes it worthwhile, since a real local path
+ * would be a strong identifier in every request.
+ *
+ * As a consequence the git context this extension used to collect — branch, main
+ * branch, status, recent commits — is not sent upstream. Local paths and commit
+ * subjects are exactly the kind of identifying detail the profile exists to keep
+ * out of requests.
+ */
 export async function prepareChatRequest({
 	authManager,
+	endpoint,
 	modelInfo,
 	modelDefinition,
 	messages,
@@ -43,71 +63,77 @@ export async function prepareChatRequest({
 		throw new Error(t('auth.notConfigured'));
 	}
 
-	const extraHeaders = getZdrEnabled() ? ZDR_HEADER : undefined;
-	const client = new CommandCodeClient(apiKey, {
-		extraHeaders,
-		debug: getDebugLoggingEnabled(),
-	});
-
 	const thinkingCapability = modelDefinition?.capabilities.thinking;
 	const imageInput = modelDefinition?.capabilities.imageInput ?? false;
-	const maxTokens = getMaxTokens();
+	const configuredMaxTokens = getMaxTokens();
+	// The definition's `maxOutputTokens` came from `resolveTokenBudget`, the same
+	// function that produced the number reported to Copilot. Reusing it here is
+	// what keeps the two from drifting: a context override or a `maxTokens`
+	// setting moves both sides together.
+	const maxTokens = modelDefinition?.maxOutputTokens ?? configuredMaxTokens;
 
-	const convertedMessages = convertMessages(messages, { imageInput });
-	const { system, messages: chatMessages } = extractSystemMessages(convertedMessages);
+	const chatMessages = convertMessages(messages, { imageInput });
 	const tools = prepareTools(modelDefinition?.capabilities.toolCalling, options);
-	const generateTools = toGenerateTools(tools) ?? [];
 
-	const totalRequestChars = countMessageChars(convertedMessages);
 	const thinkingEffort: ThinkingEffort = thinkingCapability
 		? getConfiguredThinkingEffort(options as ModelConfigurationOptions, thinkingCapability)
 		: 'none';
 
-	const request: ChatRequest = {
-		config: await collectRequestConfig(),
-		memory: '',
-		taste: '',
-		skills: '',
-		params: {
-			model: modelInfo.id,
-			messages: toGenerateMessages(chatMessages),
-			tools: generateTools,
-			system,
-			max_tokens: maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
-			temperature: 0.3,
-			stream: true,
-			// `/alpha/generate` selects tools automatically when `tools` is present;
-			// unlike Chat Completions, it does not use a string `tool_choice` field.
-			// Attach `reasoning_effort` only when thinking is enabled. `none`
-			// intentionally omits the field so the upstream model uses its
-			// default (non-thinking) behavior.
-			...(thinkingEffort !== 'none' ? { reasoning_effort: thinkingEffort } : {}),
-		},
-		threadId: getThreadId(options),
+	const request: ProxyRequest = {
+		model: modelInfo.id,
+		messages: chatMessages,
+		...(tools?.length ? { tools: tools as readonly OpenAITool[] } : {}),
+		// `maxTokens` comes from the model definition, which already applied this
+		// model's own ceiling. The fallback repeats that ceiling for the case where
+		// no definition was found, so an unknown model is never sent more than it
+		// accepts. Sending the budget also keeps the reported figure and the sent
+		// figure in agreement.
+		maxTokens: maxTokens ?? outputCeilingFor(modelInfo.id),
+		temperature: 0.3,
+		// `none` omits the field so the upstream model uses its default
+		// non-thinking behaviour, rather than being told to disable thinking.
+		...(thinkingEffort !== 'none' ? { reasoningEffort: thinkingEffort } : {}),
+	};
+
+	const proxy: ProxyClientOptions = {
+		baseUrl: endpoint.baseUrl,
+		apiKey,
+		...(getZdrEnabled() ? { zeroDataRetention: true } : {}),
+		...(getDebugLoggingEnabled() ? { debug: true } : {}),
 	};
 
 	logger.debug(
-		`Prepared request: model=${request.params.model} messages=${chatMessages.length} tools=${tools?.length ?? 0} thinking=${thinkingEffort}`,
+		`Prepared request: model=${request.model} messages=${chatMessages.length} ` +
+			`tools=${tools?.length ?? 0} thinking=${thinkingEffort} ` +
+			`maxTokens=${request.maxTokens} via proxy:${endpoint.port}`,
 	);
 
 	return {
-		client,
+		proxy,
 		request,
-		totalRequestChars,
+		totalRequestChars: countMessageChars(chatMessages),
 	};
 }
 
+/**
+ * Convert VS Code tool definitions to the OpenAI `tools` payload.
+ *
+ * No count check happens here. An earlier build refused requests carrying more
+ * than 128 tools, citing a constant that had been copied from the
+ * `/provider/v1/chat/completions` limit — an endpoint the Go plan cannot use, and
+ * never re-validated against the endpoint requests actually reach. Sending 127,
+ * 128, 129, 150, 209 and 300 tools through the proxy all succeeded, so the
+ * guard rejected only requests the vendor would have served. It also wasted
+ * time: Copilot retried the same deterministic failure five times.
+ */
 function prepareTools(
-	toolCallingCapability: false | number | undefined,
+	toolCallingCapability: boolean | number | undefined,
 	options: vscode.ProvideLanguageModelChatResponseOptions,
 ): ChatTool[] | undefined {
-	if (toolCallingCapability === undefined || toolCallingCapability === false) {
+	if (!toolCallingCapability) {
 		return undefined;
 	}
-	const tools = convertTools(options.tools);
-	const count = tools?.length ?? 0;
-	if (count > toolCallingCapability) {
-		throw new Error(t('request.toolsLimitExceeded', toolCallingCapability, count));
-	}
-	return tools;
+	return convertTools(options.tools);
 }
+
+export type { ChatMessage };

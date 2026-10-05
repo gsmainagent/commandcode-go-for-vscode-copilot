@@ -1,17 +1,7 @@
 import vscode from 'vscode';
 import { LANGUAGE_MODEL_CHAT_SYSTEM_ROLE } from '../consts';
 import { safeStringify } from '../json';
-import type {
-	ChatMessage,
-	ChatMessagePart,
-	ChatTool,
-	ChatToolCall,
-	CommandCodeMessagePart,
-	CommandCodeTool,
-	CommandCodeGenerateMessage,
-} from '../types';
-
-const EMPTY_TOOL_SCHEMA = { type: 'object', properties: {} } as const;
+import type { ChatMessage, ChatMessagePart, ChatTool, ChatToolCall } from '../types';
 
 /**
  * Convert VS Code chat messages to OpenAI-compatible format. Images are
@@ -90,16 +80,15 @@ export function convertMessages(
 		} else if (role === 'user') {
 			if (text || imageSegments.length > 0) {
 				if (imageSegments.length > 0) {
+					// The array form is what OpenAI expects on the wire. A separate
+					// `parts` field was only ever read by the second conversion hop,
+					// which no longer exists.
 					const parts: ChatMessagePart[] = [];
 					if (text) {
 						parts.push({ type: 'text', text });
 					}
 					parts.push(...imageSegments);
-					result.push({
-						role: 'user',
-						content: text,
-						parts,
-					});
+					result.push({ role: 'user', content: parts });
 				} else {
 					result.push({ role: 'user', content: text });
 				}
@@ -160,26 +149,6 @@ function mapRole(role: vscode.LanguageModelChatMessageRole): ChatMessage['role']
  * `/alpha/generate` accepts system instructions separately from its Vercel AI
  * SDK message array. Keep the remaining conversation in its original order.
  */
-export function extractSystemMessages(messages: readonly ChatMessage[]): {
-	system: string;
-	messages: ChatMessage[];
-} {
-	const system: string[] = [];
-	const conversation: ChatMessage[] = [];
-
-	for (const message of messages) {
-		if (message.role === 'system') {
-			if (message.content) {
-				system.push(message.content);
-			}
-		} else {
-			conversation.push(message);
-		}
-	}
-
-	return { system: system.join('\n'), messages: conversation };
-}
-
 /**
  * Convert VS Code tool definitions to the OpenAI `tools` payload.
  */
@@ -201,119 +170,25 @@ export function convertTools(
 }
 
 /**
- * Convert the OpenAI-shaped intermediate tools to Command Code's wire shape.
- * `/alpha/generate` expects `name`, `description`, and `input_schema` at the
- * top level of each definition.
- */
-export function toGenerateTools(
-	tools: readonly ChatTool[] | undefined,
-): CommandCodeTool[] | undefined {
-	if (!tools?.length) {
-		return undefined;
-	}
-
-	return tools.map((tool) => ({
-		name: tool.function.name,
-		description: tool.function.description ?? '',
-		input_schema: tool.function.parameters ?? EMPTY_TOOL_SCHEMA,
-	}));
-}
-
-/**
- * Turn the OpenAI-shaped intermediate messages into the content-part format
- * required by Command Code's `/alpha/generate` endpoint.
- */
-export function toGenerateMessages(messages: readonly ChatMessage[]): CommandCodeGenerateMessage[] {
-	const toolNames = new Map<string, string>();
-
-	return messages.map((message) => {
-		if (message.role === 'tool') {
-			const toolCallId = message.tool_call_id ?? '';
-			const toolName = toolNames.get(toolCallId) ?? 'unknown';
-			return {
-				role: 'tool' as const,
-				content: [
-					{
-						type: 'tool-result' as const,
-						toolCallId,
-						toolName,
-						output: { type: 'text' as const, value: message.content },
-					},
-				],
-			};
-		}
-
-		const content: CommandCodeMessagePart[] = [];
-		if (message.role === 'assistant' && message.reasoning_content) {
-			content.push({ type: 'reasoning', text: message.reasoning_content });
-		}
-		if (message.parts && message.parts.length > 0) {
-			for (const part of message.parts) {
-				if (part.type === 'image_url') {
-					const imageUrl = part.image_url.url;
-					const mimeType = getMediaType(imageUrl);
-					content.push({
-						type: 'image',
-						image: imageUrl,
-						...(mimeType ? { mimeType } : {}),
-					});
-				} else {
-					content.push({ type: 'text', text: part.text });
-				}
-			}
-		} else if (message.content || message.role !== 'assistant') {
-			content.push({ type: 'text', text: message.content });
-		}
-
-		if (message.role === 'assistant' && message.tool_calls) {
-			for (const toolCall of message.tool_calls) {
-				const toolName = toolCall.function.name;
-				toolNames.set(toolCall.id, toolName);
-				content.push({
-					type: 'tool-call',
-					toolCallId: toolCall.id,
-					toolName,
-					input: parseToolArguments(toolCall.function.arguments),
-				});
-			}
-		}
-
-		return { role: message.role, content };
-	});
-}
-
-function parseToolArguments(value: string): Record<string, unknown> {
-	try {
-		const parsed: unknown = JSON.parse(value);
-		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: {};
-	} catch {
-		return {};
-	}
-}
-
-function getMediaType(url: string): string | undefined {
-	const match = /^data:([^;,]+)[;,]/u.exec(url);
-	return match?.[1];
-}
-
-/**
  * Sum character counts across all messages so we can calibrate the
  * chars-per-token ratio when usage stats are reported back from the API.
+ *
+ * `content` is counted as text only. An image part carries a base64 payload
+ * whose length says nothing useful about token count, so counting it would skew
+ * the calibration rather than improve it.
  */
 export function countMessageChars(messages: readonly ChatMessage[]): number {
 	let total = 0;
 	for (const msg of messages) {
 		total += msg.reasoning_content?.length ?? 0;
-		if (msg.parts) {
-			for (const part of msg.parts) {
+		if (typeof msg.content === 'string') {
+			total += msg.content.length;
+		} else {
+			for (const part of msg.content) {
 				if (part.type === 'text') {
 					total += part.text.length;
 				}
 			}
-		} else {
-			total += msg.content.length;
 		}
 		if (msg.tool_calls) {
 			for (const tc of msg.tool_calls) {

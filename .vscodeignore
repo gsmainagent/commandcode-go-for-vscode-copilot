@@ -21,3 +21,7 @@ example.jsonl
 .env*
 !.env.example
 vscode.proposed.languageModelThinkingPart.d.ts
+tools/**
+test/**
+.test-build/**
+tsconfig.test.json

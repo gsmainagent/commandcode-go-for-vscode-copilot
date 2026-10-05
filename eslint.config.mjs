@@ -3,7 +3,9 @@ import tsparser from '@typescript-eslint/parser';
 
 export default [
 	{
-		files: ['src/**/*.ts'],
+		// Tests use the same rules as src. They live outside `src/` so the
+		// published extension never carries them, but they are still linted.
+		files: ['src/**/*.ts', 'test/**/*.ts'],
 		languageOptions: {
 			parser: tsparser,
 			parserOptions: {
@@ -60,6 +62,6 @@ export default [
 		},
 	},
 	{
-		ignores: ['out/**', 'dist/**', 'node_modules/**'],
+		ignores: ['out/**', 'dist/**', 'node_modules/**', '.test-build/**'],
 	},
 ];

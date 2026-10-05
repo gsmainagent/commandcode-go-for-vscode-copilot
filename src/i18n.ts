@@ -39,15 +39,30 @@ const zh: Translations = {
 	'thinking.high.desc': '深度推理，适合复杂任务',
 
 	// Models
-	'models.refreshInProgress': '正在刷新模型列表...',
-	'models.refreshSucceeded': '已从 Command Code 拉取 {0} 个模型。',
+	'models.refreshSucceeded': '已从 Command Code Go 套餐页刷新 {0} 个模型。',
 	'models.refreshFailed': '拉取模型列表失败：{0}',
 	'models.empty': '没有可用的模型。请检查 API Key，或调整模型黑名单设置。',
 	'models.fetchRequiresKey': '需要先配置 API Key 才能拉取模型列表。',
 
+	// Capabilities
+	'capability.vision': '视觉',
+	'capability.reasoning': '推理',
+	'tooltip.capabilities': '能力',
+	'tooltip.modelId': '模型 ID',
+	'model.intelligence': '智能指数',
+	'model.price': '价格',
+	'model.priceInput': '输入',
+	'model.priceOutput': '输出',
+	'model.priceCacheRead': '缓存读',
+	'model.priceCacheWrite': '缓存写',
+	'model.pricePerMTokens': '/ 百万 tokens',
+	'model.pricePeak': '高峰',
+	'model.pricePeakWindow': '高峰时段',
+	'model.priceOffPeakHours': '非高峰 {0} 小时/天',
+	'model.priceFree': '免费',
+	'tooltip.contextLength': '上下文',
+
 	// Request
-	'request.toolsLimitExceeded':
-		'Command Code 单次 tools 请求最多支持 {0} 个 functions，当前请求包含 {1} 个。请先用 VS Code 的 Configure Tools 关闭不常用的工具。',
 
 	// Errors
 	'error.http.400': '[{0}] 请求体格式错误。{1}',
@@ -107,15 +122,28 @@ const en: Translations = {
 	'thinking.high.desc': 'Deep reasoning for complex tasks',
 
 	// Models
-	'models.refreshInProgress': 'Refreshing model list...',
-	'models.refreshSucceeded': 'Pulled {0} models from Command Code.',
+	'models.refreshSucceeded': 'Refreshed {0} models from the Command Code Go plan page.',
 	'models.refreshFailed': 'Failed to refresh models: {0}',
 	'models.empty': 'No models are available. Check your API key or model blacklist.',
 	'models.fetchRequiresKey': 'Set an API key before refreshing the model list.',
 
-	// Request
-	'request.toolsLimitExceeded':
-		"Command Code accepts at most {0} tools per request; this request contains {1}. Disable rarely-used tools in VS Code's Configure Tools view.",
+	// Capabilities
+	'capability.vision': 'Vision',
+	'capability.reasoning': 'Reasoning',
+	'tooltip.capabilities': 'Capabilities',
+	'tooltip.modelId': 'Model ID',
+	'model.intelligence': 'Intelligence',
+	'model.price': 'Price',
+	'model.priceInput': 'input',
+	'model.priceOutput': 'output',
+	'model.priceCacheRead': 'cache read',
+	'model.priceCacheWrite': 'cache write',
+	'model.pricePerMTokens': '/M tokens',
+	'model.pricePeak': 'peak',
+	'model.pricePeakWindow': 'Peak window',
+	'model.priceOffPeakHours': '{0}h/day off-peak',
+	'model.priceFree': 'Free',
+	'tooltip.contextLength': 'Context',
 
 	// Errors
 	'error.http.400': '[{0}] Malformed request body. {1}',

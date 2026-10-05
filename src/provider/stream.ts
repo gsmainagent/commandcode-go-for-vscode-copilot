@@ -1,5 +1,5 @@
 import vscode from 'vscode';
-import { createUserFacingError } from '../client';
+import { streamChatCompletion as proxyStream } from '../client/proxy-client';
 import { logger } from '../logger';
 import type { ChatToolCall, ChatUsage } from '../types';
 import type { PreparedChatRequest } from './request';
@@ -21,7 +21,8 @@ export function streamChatCompletion({
 	getCharsPerToken,
 	setCharsPerToken,
 }: StreamChatCompletionOptions): Promise<void> {
-	return prepared.client.streamChatCompletion(
+	return proxyStream(
+		prepared.proxy,
 		prepared.request,
 		{
 			onContent: (content: string) => {
@@ -47,8 +48,11 @@ export function streamChatCompletion({
 				}
 			},
 
+			// Throwing here rejects the returned promise, which is how Copilot Chat
+			// receives the failure. The proxy client has already mapped it to a
+			// user-facing error, so it is rethrown as-is rather than wrapped twice.
 			onError: (error: Error) => {
-				throw createUserFacingError(error);
+				throw error;
 			},
 
 			onUsage: (usage: ChatUsage) => {

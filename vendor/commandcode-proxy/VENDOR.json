@@ -1,0 +1,8 @@
+{
+  "repo": "https://github.com/MAXeaglet/commandcode-proxy.git",
+  "commit": "ce5a2177d177893760300b2ae734989a0d56acbb",
+  "commitDate": "2026-10-01T08:21:55+08:00",
+  "fileSha256": "809efb2399ceada06abd47de5e72e7b6e42d83981bd61a483c6b7d55e8ef70cd",
+  "entrypoint": "proxy.mjs",
+  "note": "Bump COMMIT when the upstream proxy re-aligns with the CLI protocol. Do not vendor from npm: that package is an earlier lineage without risk control."
+}

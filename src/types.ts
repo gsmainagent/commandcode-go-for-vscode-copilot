@@ -20,8 +20,15 @@ export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ChatMessage {
 	role: ChatRole;
-	/** Text content of the message. May be empty for tool/assistant turns. */
-	content: string;
+	/**
+	 * Message content.
+	 *
+	 * A string for text-only messages; an array for user messages carrying
+	 * images, because that is the OpenAI shape the proxy accepts on the wire.
+	 * The array form is only ever produced for vision input, so callers that
+	 * expect text must read `content` defensively rather than assuming a string.
+	 */
+	content: string | ChatMessagePart[];
 	tool_call_id?: string;
 	tool_calls?: ChatToolCall[];
 	reasoning_content?: string;
@@ -54,85 +61,12 @@ export interface ChatTool {
 	};
 }
 
-/**
- * Tool definition used by Command Code's `/alpha/generate` envelope.
- *
- * This endpoint does not accept the OpenAI `{ type, function: {...} }` shape;
- * it expects the Vercel/CLI shape with the name and JSON schema at the top
- * level.
- */
-export interface CommandCodeTool {
-	name: string;
-	description: string;
-	input_schema: Record<string, unknown>;
-}
-
 export interface ChatUsage {
 	prompt_tokens: number;
 	completion_tokens: number;
 	total_tokens: number;
 	prompt_cache_hit_tokens?: number;
 	prompt_cache_miss_tokens?: number;
-}
-
-/** Workspace and Git metadata required by the Command Code generate endpoint. */
-export interface CommandCodeRequestConfig {
-	workingDir: string;
-	date: string;
-	environment: 'cli';
-	structure: unknown[];
-	isGitRepo: boolean;
-	currentBranch: string;
-	mainBranch: string;
-	gitStatus: string;
-	recentCommits: string[];
-}
-
-/** A message encoded in the `params.messages` format used by `/alpha/generate`. */
-export interface CommandCodeGenerateMessage {
-	role: ChatRole;
-	content: CommandCodeMessagePart[];
-}
-
-/** Content parts accepted by the Vercel AI SDK message schema. */
-export type CommandCodeMessagePart =
-	| { type: 'text'; text: string }
-	| { type: 'image'; image: string; mimeType?: string }
-	| { type: 'reasoning'; text: string }
-	| { type: 'tool-call'; toolCallId: string; toolName: string; input: Record<string, unknown> }
-	| {
-			type: 'tool-result';
-			toolCallId: string;
-			toolName: string;
-			output: { type: 'text' | 'error-text'; value: string };
-	  };
-
-/** Parameters accepted by the Command Code generate endpoint. */
-export interface CommandCodeGenerateParams {
-	model: string;
-	messages: CommandCodeGenerateMessage[];
-	tools: CommandCodeTool[];
-	system: string;
-	max_tokens: number;
-	temperature: number;
-	stream: true;
-	reasoning_effort?: ReasoningEffort;
-}
-
-/**
- * Request envelope used by `POST /alpha/generate`.
- *
- * `memory`, `taste`, and `skills` are deliberately empty for the VS Code
- * integration. Command Code's CLI owns those values; VS Code already sends
- * its chat context as `params.messages`.
- */
-export interface ChatRequest {
-	config: CommandCodeRequestConfig;
-	memory: '';
-	taste: '';
-	skills: '';
-	params: CommandCodeGenerateParams;
-	threadId: string;
 }
 
 // ---- Stream callbacks ----
@@ -156,6 +90,33 @@ export interface ThinkingCapability {
 	canDisable: boolean;
 }
 
+/**
+ * Prices in USD per million tokens, as stated by the plan page.
+ *
+ * `input` / `output` / `cacheRead` / `cacheWrite` are the off-peak rates the page
+ * displays. The `peak*` figures come from the same cell's `aria-label`, which
+ * spells out the higher rate and the window it applies to.
+ *
+ * A model priced at zero is free (`input === 0`), not unknown — unknown is
+ * `undefined`.
+ */
+export interface PlanPricing {
+	readonly input: number | undefined;
+	readonly output: number | undefined;
+	readonly cacheRead: number | undefined;
+	readonly cacheWrite: number | undefined;
+	/** Peak-hour input rate, when the page states one. */
+	readonly peakInput?: number;
+	/** Peak-hour output rate, when the page states one. */
+	readonly peakOutput?: number;
+	/** Peak-hour cache-read rate, when the page states one. */
+	readonly peakCacheRead?: number;
+	/** Peak window verbatim, e.g. `01–04 & 06–10 UTC, Mon–Fri`. */
+	readonly peakWindow?: string;
+	/** Hours per day billed at off-peak rates, e.g. 17 for `17h/day`. */
+	readonly offPeakHoursPerDay?: number;
+}
+
 export interface ModelDefinition {
 	id: string;
 	name: string;
@@ -166,10 +127,47 @@ export interface ModelDefinition {
 	maxOutputTokens: number;
 	capabilities: {
 		/** `false` disables tools; a number limits tools per request. */
-		toolCalling: false | number;
+		toolCalling: boolean | number;
 		imageInput: boolean;
 		thinking: ThinkingCapability | false;
 	};
 	/** Optional category used to group models in logs/UI. */
 	category?: string;
+	/**
+	 * Plan-page metadata, when the docs page supplied it.
+	 *
+	 * Absent when the plan page could not be read and nothing was cached, which
+	 * is why every field here is optional. The picker degrades to showing only
+	 * what the API catalog states rather than inventing figures.
+	 */
+	pricing?: PlanPricing;
+	/** The plan page's `Intelligence` index score. */
+	intelligence?: number;
+	/**
+	 * True when the model came from the plan page rather than the curated
+	 * registry in `models.ts`. Fetched entries surface the upstream model id in
+	 * the picker tooltip.
+	 */
+	fetched?: boolean;
+}
+
+/**
+ * One entry from `GET /provider/v1/models`.
+ *
+ * Only `id` is read: the catalog exists solely to supply canonical model ids,
+ * because the plan page names models by slug (`kimi-k3`) while the Generate API
+ * expects `moonshotai/Kimi-K3`. Names, windows, and capabilities all come from
+ * the plan page instead.
+ */
+export interface ApiModelInfo {
+	id?: string;
+	owned_by?: string;
+	/** Human-readable name; present on the official catalog endpoint. */
+	name?: string;
+	/** Total context window (input + output) in tokens, when advertised. */
+	context_length?: number;
+	/** Unix seconds, as served. Unused today but part of the shape. */
+	created?: number;
+	/** Wire protocols this model is served on, e.g. `/chat/completions`. */
+	supported_endpoints?: string[];
 }

@@ -2,10 +2,12 @@ import vscode from 'vscode';
 import { t } from '../i18n';
 import type {
 	ModelDefinition,
+	PlanPricing,
 	ReasoningEffort,
 	ThinkingCapability,
 	ThinkingEffort,
 } from '../types';
+import { getMaxContextTokensOverride } from '../config';
 
 /**
  * Non-public Copilot Chat API surface.
@@ -32,15 +34,22 @@ export type ModelPickerChatInformation = vscode.LanguageModelChatInformation & {
 
 export function toChatInfo(m: ModelDefinition, hasApiKey: boolean): ModelPickerChatInformation {
 	const thinkingCapability = m.capabilities.thinking;
+	const contextOverride = getMaxContextTokensOverride();
+
+	// Precedence for the window reported to Copilot: an explicit
+	// `maxContextTokens` setting wins, otherwise the value derived from the
+	// live catalog (or the static registry as fallback) stands.
+	const maxInputTokens = contextOverride > 0 ? contextOverride : m.maxInputTokens;
+
 	return {
 		id: m.id,
 		name: m.name,
 		family: m.family,
 		version: m.version,
 		detail: hasApiKey ? m.detail : t('auth.apiKeyRequiredDetail'),
-		tooltip: hasApiKey ? m.detail : t('auth.apiKeyRequiredDetail'),
+		tooltip: hasApiKey ? formatTooltip(m) : t('auth.apiKeyRequiredDetail'),
 		statusIcon: hasApiKey ? undefined : new vscode.ThemeIcon('warning'),
-		maxInputTokens: m.maxInputTokens,
+		maxInputTokens,
 		maxOutputTokens: m.maxOutputTokens,
 		isBYOK: true,
 		isUserSelectable: true,
@@ -52,6 +61,110 @@ export function toChatInfo(m: ModelDefinition, hasApiKey: boolean): ModelPickerC
 			? { configurationSchema: buildThinkingEffortSchema(thinkingCapability) }
 			: {}),
 	};
+}
+
+/**
+ * Build the hover tooltip card shown by Copilot Chat's model picker.
+ *
+ * Everything here comes from the plan page, so a model whose metadata could not
+ * be read simply shows less rather than showing something invented. Sections are
+ * omitted when empty; no placeholder dashes are rendered, because a dash on the
+ * docs page means "not supported", not "unknown".
+ *
+ * Off-peak and peak prices never split the model into two entries — there is one
+ * name per model. The peak rate and its window are described here instead.
+ */
+function formatTooltip(m: ModelDefinition): string {
+	const sections: string[] = [];
+
+	if (m.detail) {
+		sections.push(m.detail);
+	}
+
+	const facts: string[] = [];
+	if (m.intelligence !== undefined) {
+		facts.push(`${t('model.intelligence')} ${m.intelligence}`);
+	}
+	if (m.capabilities.imageInput) {
+		facts.push(t('capability.vision'));
+	}
+	if (m.capabilities.thinking) {
+		facts.push(t('capability.reasoning'));
+	}
+	if (facts.length > 0) {
+		sections.push(facts.join(' · '));
+	}
+
+	const price = formatPricing(m.pricing);
+	if (price) {
+		sections.push(price);
+	}
+
+	if (m.fetched) {
+		sections.push(`${t('tooltip.modelId')}: ${m.id}`);
+	}
+
+	return sections.join('\n\n');
+}
+
+/**
+ * Render the plan page's price table.
+ *
+ * All figures are USD per million tokens. A rate of exactly zero means the model
+ * is free, which the page also states outright; `undefined` means the page did
+ * not say, and that column is left out entirely.
+ */
+function formatPricing(pricing: PlanPricing | undefined): string | undefined {
+	if (!pricing) {
+		return undefined;
+	}
+
+	const rates: Array<readonly [string, number | undefined, number | undefined]> = [
+		[t('model.priceInput'), pricing.input, pricing.peakInput],
+		[t('model.priceOutput'), pricing.output, pricing.peakOutput],
+		[t('model.priceCacheRead'), pricing.cacheRead, pricing.peakCacheRead],
+		[t('model.priceCacheWrite'), pricing.cacheWrite, undefined],
+	];
+
+	const rows: string[] = [];
+	for (const [label, offPeak, peak] of rates) {
+		if (offPeak === undefined) {
+			continue;
+		}
+		if (offPeak === 0) {
+			rows.push(`${label}: ${t('model.priceFree')}`);
+			continue;
+		}
+		const base = `$${formatRate(offPeak)}${t('model.pricePerMTokens')}`;
+		rows.push(
+			peak !== undefined && peak !== offPeak
+				? `${base} (${t('model.pricePeak')} $${formatRate(peak)})`
+				: base,
+		);
+	}
+
+	if (rows.length === 0) {
+		return undefined;
+	}
+
+	const notes: string[] = [];
+	if (pricing.offPeakHoursPerDay !== undefined) {
+		notes.push(t('model.priceOffPeakHours', pricing.offPeakHoursPerDay));
+	}
+	if (pricing.peakWindow) {
+		notes.push(`${t('model.pricePeakWindow')}: ${pricing.peakWindow}`);
+	}
+
+	const heading = `${t('model.price')} ${t('model.pricePerMTokens')}`;
+	return notes.length > 0
+		? `${heading}\n${rows.join('\n')}\n${notes.join(' · ')}`
+		: `${heading}\n${rows.join('\n')}`;
+}
+
+/** Trim trailing zeros so `1.50` reads as `$1.5` and `0.016` keeps its precision. */
+function formatRate(value: number): string {
+	const rounded = Math.round(value * 1_000_000) / 1_000_000;
+	return String(rounded);
 }
 
 export function getConfiguredThinkingEffort(
