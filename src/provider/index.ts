@@ -11,6 +11,7 @@ import {
 	getModelBlacklist,
 	getModelSource,
 	getPlanBaseUrl,
+	getUpstreamProxy,
 } from '../config';
 import { VENDOR_ID } from '../consts';
 import { toChatInfo } from './models';
@@ -63,6 +64,15 @@ export class CommandCodeChatProvider implements vscode.LanguageModelChatProvider
 			this.onDidChangeLanguageModelChatInformationEmitter,
 			// The API key may be stored in settings or SecretStorage.
 			vscode.workspace.onDidChangeConfiguration((e) => {
+				// The proxy reads its upstream proxy from the environment it was
+				// spawned with, and `ensureProxy` returns the running instance as
+				// soon as one is ready. So a new value cannot be picked up by the
+				// existing process: stop it, and the next request spawns a fresh
+				// one with the new environment. Without this, the setting would
+				// appear inert until the window reloaded.
+				if (e.affectsConfiguration('commandcode-copilot.upstreamProxy')) {
+					stopProxy();
+				}
 				if (
 					e.affectsConfiguration('commandcode-copilot.apiKey') ||
 					e.affectsConfiguration('commandcode-copilot.catalogBaseUrl') ||
@@ -198,7 +208,11 @@ export class CommandCodeChatProvider implements vscode.LanguageModelChatProvider
 	): Promise<void> {
 		const modelDefinition = this.modelById.get(modelInfo.id);
 
-		const proxyState = await ensureProxy({ extensionPath: this.extensionPath, token });
+		const proxyState = await ensureProxy({
+			extensionPath: this.extensionPath,
+			upstreamProxy: getUpstreamProxy(),
+			token,
+		});
 		if (proxyState.status !== 'ready' || !proxyState.endpoint) {
 			// No direct path exists: the upstream protocol now lives only in the
 			// vendored proxy, so a failed start means no answer at all. Saying so

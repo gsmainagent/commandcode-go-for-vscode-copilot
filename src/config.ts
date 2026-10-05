@@ -7,7 +7,8 @@ import {
 	DEFAULT_CLI_REFERENCE_BASE_URL,
 	DEFAULT_PLAN_BASE_URL,
 } from './consts';
-import { normalizeBaseUrl } from './endpoint';
+import { normalizeBaseUrl, normalizeUpstreamProxy } from './endpoint';
+import { logger } from './logger';
 
 export type DebugMode = 'minimal' | 'metadata' | 'verbose';
 const DEBUG_MODES = ['minimal', 'metadata', 'verbose'] as const satisfies readonly DebugMode[];
@@ -126,4 +127,50 @@ export function getMaxContextTokensOverride(): number {
 	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
 	const value = config.get<number>('maxContextTokens', 0);
 	return value > 0 ? value : 0;
+}
+
+/**
+ * Upstream HTTP proxy for the vendored proxy, e.g. `http://127.0.0.1:7897`.
+ *
+ * ## Why this is validated rather than passed through
+ *
+ * `proxy.mjs` refuses to start when `upstreamProxy` is not an `http://` URL:
+ *
+ *     Invalid upstreamProxy, refusing to start
+ *
+ * It validates at boot precisely so a typo cannot turn into one opaque 502 per
+ * request. Handing it a malformed value would therefore take down *every* model
+ * in the picker, not just the one the user was trying to fix. So an unusable
+ * value is dropped here and the request goes direct, which is the state the
+ * extension already worked in.
+ *
+ * ## Why the setting exists at all
+ *
+ * `proxy.mjs` reads `CC_UPSTREAM_PROXY` and nothing else. It deliberately does
+ * not read `HTTP_PROXY` or `HTTPS_PROXY` — Node's native `fetch` ignores them, and
+ * the official environment-variable route needs `NODE_USE_ENV_PROXY=1` plus a
+ * recent Node. A user behind a corporate or regional proxy therefore had no way
+ * to route these requests short of editing the extension's environment by hand.
+ *
+ * `socks5://` is not accepted: the proxy speaks HTTP CONNECT only. A mixed port
+ * such as Clash's 7897 serves both, so `http://127.0.0.1:7897` is the right value
+ * even when the same port also answers SOCKS5.
+ *
+ * Changing this takes effect after reloading the window: the proxy process is
+ * started once and reused, so a new value alone will not be picked up.
+ */
+export function getUpstreamProxy(): string | undefined {
+	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+	const raw = config.get<string>('upstreamProxy', '');
+	const normalized = normalizeUpstreamProxy(raw);
+	if (normalized === undefined && raw.trim() !== '') {
+		// Logged because the setting will otherwise appear to have no effect:
+		// the request still succeeds, just directly, which reads like a bug in
+		// whatever proxy the user was trying to configure.
+		logger.warn(
+			`Ignoring upstreamProxy "${raw}": expected an http:// URL, ` +
+				'such as http://127.0.0.1:7897. Connecting directly instead.',
+		);
+	}
+	return normalized;
 }

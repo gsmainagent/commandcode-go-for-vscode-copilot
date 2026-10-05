@@ -57,6 +57,14 @@ export interface ProxyEndpoint {
 export interface StartProxyOptions {
 	/** Absolute path to the extension root, used to locate the vendored copy. */
 	readonly extensionPath: string;
+	/**
+	 * HTTP proxy for upstream calls, already validated by `getUpstreamProxy()`.
+	 *
+	 * Passed as `CC_UPSTREAM_PROXY`, which is the only channel `proxy.mjs` reads:
+	 * it ignores `HTTP_PROXY` and `HTTPS_PROXY`, so this cannot be left to the
+	 * ambient environment.
+	 */
+	readonly upstreamProxy?: string;
 	readonly token?: CancellationToken;
 }
 
@@ -181,6 +189,10 @@ async function startProxy(options: StartProxyOptions): Promise<ProxyState> {
 			// The Provider API is unavailable on the Go plan, so the proxy must not
 			// try to read models from it. This extension resolves ids itself.
 			CC_USE_PROVIDER_MODELS: 'false',
+			// Omitted entirely when unset, rather than set to an empty string:
+			// proxy.mjs reads the variable as a URL, and an empty one is a value
+			// it must not have to interpret.
+			...(options.upstreamProxy ? { CC_UPSTREAM_PROXY: options.upstreamProxy } : {}),
 		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 		// Own process group: if the extension host is killed, the proxy goes with
