@@ -45,7 +45,6 @@
 
 import type { CancellationToken, Memento } from 'vscode';
 import {
-	COMMAND_CODE_CLIENT_VERSION,
 	DEFAULT_CATALOG_BASE_URL,
 	DEFAULT_CATALOG_REFRESH_MINUTES,
 	DEFAULT_CLI_REFERENCE_BASE_URL,
@@ -61,8 +60,8 @@ import {
 	type PlanPricing,
 	type PlanQuota,
 } from './plan-parse';
+import { fetchApiModelIds } from './api-model-ids';
 import { shouldRefresh } from './catalog-policy';
-import type { ApiModelInfo } from './types';
 
 /** Bump when the persisted snapshot shape changes. */
 const CATALOG_STATE_VERSION = 'v4';
@@ -223,48 +222,6 @@ async function persistSnapshot(
 	}
 }
 
-/**
- * Consult `/provider/v1/models` for ids the supported sources missed.
- *
- * Unsupported on Go: its POST paths answer `403 Your Go plan doesn't include API
- * access`, and only this GET is ungated. It is therefore last in the chain, and
- * every failure is silent — a 403, a timeout and a layout change all mean "no
- * extra ids", which is a state the caller already handles.
- */
-async function fetchApiModelIds(
-	baseUrl: string,
-	apiKey: string | undefined,
-	token?: CancellationToken,
-): Promise<string[]> {
-	if (!apiKey) {
-		return [];
-	}
-	const controller = new AbortController();
-	const cancel = token?.onCancellationRequested(() => controller.abort());
-	try {
-		const response = await fetch(`${baseUrl}/models`, {
-			method: 'GET',
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				'x-command-code-version': COMMAND_CODE_CLIENT_VERSION,
-				'x-cli-environment': 'production',
-			},
-			signal: controller.signal,
-		});
-		if (!response.ok) {
-			return [];
-		}
-		const body = (await response.json()) as { data?: ApiModelInfo[] };
-		return (body.data ?? [])
-			.map((model) => model.id)
-			.filter((id): id is string => typeof id === 'string' && id.length > 0);
-	} catch {
-		return [];
-	} finally {
-		cancel?.dispose();
-	}
-}
-
 interface FetchOptions {
 	readonly planBaseUrl: string;
 	readonly cliReferenceBaseUrl: string;
@@ -306,7 +263,11 @@ async function fetchSnapshot(options: FetchOptions): Promise<FetchResult | undef
 	// supported sources left something unresolved.
 	let matched = matchPlanRows(rows, supportedIds.keys());
 	if (matched.some((model) => model.id === model.slug)) {
-		const extraIds = await fetchApiModelIds(options.catalogBaseUrl, options.apiKey, options.token);
+		const extraIds = await fetchApiModelIds({
+			baseUrl: options.catalogBaseUrl,
+			apiKey: options.apiKey,
+			token: options.token,
+		});
 		if (extraIds.length > 0) {
 			matched = matchPlanRows(rows, [...supportedIds.values(), ...extraIds]);
 		}
