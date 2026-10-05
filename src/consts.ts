@@ -38,9 +38,18 @@ export const WELCOME_SHOWN_KEY = 'commandcode-copilot.welcomeShown';
 
 // ---- Walkthrough ----
 
-/** Walkthrough contribution ID. */
-export const WALKTHROUGH_ID =
-	'hotrungnhan.command-code-go-for-github-copilot#commandcodeGettingStarted';
+/**
+ * Walkthrough contribution ID.
+ *
+ * A walkthrough is addressed as `<publisher>.<name>#<walkthroughId>`, so this
+ * string is derived from the extension's own identity rather than written out.
+ * Hand-writing it meant the launch command silently stopped resolving the moment
+ * the publisher changed, which is exactly the kind of break that only shows up
+ * when someone clicks "Getting started".
+ */
+const EXTENSION_ID = 'gsmainagent.commandcode-go-for-vscode-copilot';
+
+export const WALKTHROUGH_ID = `${EXTENSION_ID}#commandcodeGettingStarted`;
 
 // ---- Provider defaults ----
 

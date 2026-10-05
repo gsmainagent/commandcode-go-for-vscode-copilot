@@ -1,11 +1,11 @@
 {
-    "name": "command-code-go-for-github-copilot",
-    "displayName": "Command Code Go for VS Code",
-    "description": "Use Command Code Go models in the GitHub Copilot Chat model picker for vscode. Vision, thinking mode, agent tools — BYOK.",
+    "name": "commandcode-go-for-vscode-copilot",
+    "displayName": "Command Code Go Copilot",
+    "description": "Use the models included with the Command Code Go plan in GitHub Copilot Chat. The model list is discovered at runtime from the plan page — BYOK.",
     "icon": "resources/icon.png",
     "version": "0.2.4",
-    "publisher": "hotrungnhan",
-    "author": "Ho Trung Nhan",
+    "publisher": "gsmainagent",
+    "author": "gsmainagent",
     "license": "MIT",
     "repository": {
         "type": "git",
