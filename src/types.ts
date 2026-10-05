@@ -100,6 +100,22 @@ export interface ThinkingCapability {
  * A model priced at zero is free (`input === 0`), not unknown — unknown is
  * `undefined`.
  */
+/**
+ * Request allowances the plan page states for one model.
+ *
+ * All three are counts of requests, not tokens. A model absent from the page's
+ * quota table has no stated allowance, which is different from an allowance of
+ * zero — so these fields are only ever present when the page printed a number.
+ */
+export interface PlanQuota {
+	/** Requests allowed per rolling 5-hour window. */
+	readonly perFiveHours: number;
+	/** Requests allowed per week. */
+	readonly perWeek: number;
+	/** Requests allowed per month. */
+	readonly perMonth: number;
+}
+
 export interface PlanPricing {
 	readonly input: number | undefined;
 	readonly output: number | undefined;
@@ -122,7 +138,18 @@ export interface ModelDefinition {
 	name: string;
 	family: string;
 	version: string;
-	detail: string;
+	/**
+	 * Short label rendered next to the model name in the picker.
+	 *
+	 * Prefer {@link detailKey}: the curated registry stores a translation key
+	 * rather than a translated string, because `src/i18n.ts` depends on the VS
+	 * Code API and so cannot be imported by the unit tests covering this module.
+	 * The key is resolved when the picker renders. `detail` remains for text that
+	 * is already language-neutral or supplied by a caller.
+	 */
+	detail?: string;
+	/** i18n key for the picker tagline, resolved at display time. */
+	detailKey?: string;
 	maxInputTokens: number;
 	maxOutputTokens: number;
 	capabilities: {
@@ -143,6 +170,14 @@ export interface ModelDefinition {
 	pricing?: PlanPricing;
 	/** The plan page's `Intelligence` index score. */
 	intelligence?: number;
+	/**
+	 * Request allowances the plan page states, when it listed this model.
+	 *
+	 * Absent for most models — the page's quota table covers 41 of the 53 on
+	 * the Go plan. An absent allowance means the page stated none, which is
+	 * not the same as unlimited, so the picker shows nothing rather than a 0.
+	 */
+	quota?: PlanQuota;
 	/**
 	 * True when the model came from the plan page rather than the curated
 	 * registry in `models.ts`. Fetched entries surface the upstream model id in

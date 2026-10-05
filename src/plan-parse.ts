@@ -15,12 +15,12 @@
  * models text-only, which is worse than falling back to the API catalog.
  */
 
-import type { PlanPricing } from './types';
+import type { PlanPricing, PlanQuota } from './types';
 
 /** A plan page yielding fewer models than this is treated as a parse failure. */
 export const MIN_PLAN_MODELS = 20;
 
-export type { PlanPricing } from './types';
+export type { PlanPricing, PlanQuota } from './types';
 
 export interface PlanModelRow {
 	/** Docs slug, e.g. `kimi-k3`. */
@@ -41,6 +41,8 @@ export interface PlanModelRow {
 	readonly pricing: PlanPricing | undefined;
 	/** The `Intelligence` column, an index score, or `undefined`. */
 	readonly intelligence: number | undefined;
+	/** Request allowances, when the page's quota table lists this model. */
+	readonly quota: PlanQuota | undefined;
 }
 
 export interface PlanCapabilities {
@@ -289,6 +291,11 @@ export function parsePlanTable(html: string): PlanModelRow[] {
 	if (!table) {
 		return [];
 	}
+
+	// A second table on the page carries request allowances, keyed by display
+	// name. Its absence is normal — it covers 41 of the 53 models — so a model
+	// with no entry simply has no stated allowance.
+	const quotas = parseQuotaTable(html);
 	const headerRoles = parseHeaderRoles(table);
 
 	// The Context and Intelligence columns are identifiable only from the header:
@@ -395,17 +402,83 @@ export function parsePlanTable(html: string): PlanModelRow[] {
 				}
 			: undefined;
 
+		const displayName = name || slug;
 		rows.push({
 			slug: slug.toLowerCase(),
-			name: name || slug,
+			name: displayName,
 			caps,
 			contextLength,
 			pricing,
 			intelligence,
+			quota: quotas.get(slugifyModelKey(displayName)),
 		});
 	}
 
 	return rows;
+}
+
+/** Header label that identifies the allowance table. */
+const QUOTA_HEADER_MARKER = /requests\s*\/\s*5\s*hours/i;
+
+/**
+ * Parse a request-count cell such as `4,620` or `81.4`.
+ *
+ * Thousands separators are stripped, and a fractional value is kept as-is: the
+ * page prints `81.4`, `64.7` and `93.3` for three models where every other row is
+ * a whole number, and those figures double and redouble in step with the integer
+ * rows, so they are real counts rather than thousands.
+ */
+function parseRequestCount(text: string): number | undefined {
+	const match = /^([\d,]+(?:\.\d+)?)$/.exec(text.trim());
+	if (!match) {
+		return undefined;
+	}
+	const value = Number(match[1].replace(/,/g, ''));
+	return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Parse the plan page's request-allowance table.
+ *
+ * This is a second table, separate from the model list that `parsePlanTable`
+ * reads, so it is located by its own header rather than by position. Results are
+ * keyed by the display name the page prints, which is the only identifier the two
+ * tables share.
+ *
+ * A row with any unreadable figure is dropped rather than partially recorded: a
+ * model shown a 5-hour allowance but no weekly one would read as though the
+ * weekly limit did not exist.
+ */
+export function parseQuotaTable(html: string): Map<string, PlanQuota> {
+	const quotas = new Map<string, PlanQuota>();
+
+	for (const match of html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)) {
+		const table = match[0];
+		if (!QUOTA_HEADER_MARKER.test(stripTags(table))) {
+			continue;
+		}
+		for (const rowMatch of table.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) ?? []) {
+			const cells = (rowMatch.match(/<td\b[^>]*>[\s\S]*?<\/td>/gi) ?? []).map((cell) =>
+				decodeEntities(stripTags(cell)),
+			);
+			if (cells.length < 4) {
+				continue;
+			}
+			// The first cell is the display name; the rest are request counts.
+			const name = cells[0].trim();
+			const [perFiveHours, perWeek, perMonth] = cells.slice(1).map(parseRequestCount);
+			if (!name || perFiveHours === undefined || perWeek === undefined || perMonth === undefined) {
+				continue;
+			}
+			// Same key the model rows are looked up with. Storing the raw
+			// lowercased name instead attached only 13 of 41 allowances, because
+			// `DeepSeek V4 Flash` and `deepseek-v4-flash` are different strings.
+			quotas.set(slugifyModelKey(name), { perFiveHours, perWeek, perMonth });
+		}
+		break;
+	}
+
+	return quotas;
 }
 
 /**

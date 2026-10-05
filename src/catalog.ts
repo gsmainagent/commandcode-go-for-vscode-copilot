@@ -54,7 +54,13 @@ import {
 import { logger } from './logger';
 import { fetchCliReferenceIds } from './cli-reference-fetch';
 import { fetchPlanCatalog } from './plan-catalog';
-import { buildModelIdIndex, matchPlanRows, slugifyModelKey, type PlanPricing } from './plan-parse';
+import {
+	buildModelIdIndex,
+	matchPlanRows,
+	slugifyModelKey,
+	type PlanPricing,
+	type PlanQuota,
+} from './plan-parse';
 import { shouldRefresh } from './catalog-policy';
 import type { ApiModelInfo } from './types';
 
@@ -84,6 +90,14 @@ export interface CatalogModel {
 	readonly pricing?: PlanPricing;
 	/** The plan page's `Intelligence` index score, when it stated one. */
 	readonly intelligence?: number;
+	/**
+	 * Request allowances, when the plan page's quota table listed this model.
+	 *
+	 * Absent for most models: the table covers 41 of the 53 on the Go plan, so
+	 * a missing allowance means the page said nothing, not that the model is
+	 * unlimited. The picker therefore shows no allowance rather than a zero.
+	 */
+	readonly quota?: PlanQuota;
 	/**
 	 * True when the id is a bare docs slug rather than a canonical one.
 	 *
@@ -156,6 +170,7 @@ function toCatalogModel(raw: unknown): CatalogModel | undefined {
 		...(typeof raw.reasoning === 'boolean' ? { reasoning: raw.reasoning } : {}),
 		...(isRecord(raw.pricing) ? { pricing: raw.pricing as unknown as PlanPricing } : {}),
 		...(typeof raw.intelligence === 'number' ? { intelligence: raw.intelligence } : {}),
+		...(isRecord(raw.quota) ? { quota: raw.quota as unknown as PlanQuota } : {}),
 		...(raw.unresolvedId === true ? { unresolvedId: true } : {}),
 	};
 }
@@ -307,6 +322,7 @@ async function fetchSnapshot(options: FetchOptions): Promise<FetchResult | undef
 			...(row.caps ? { vision: row.caps.vision, reasoning: row.caps.reasoning } : {}),
 			...(row.pricing ? { pricing: row.pricing } : {}),
 			...(row.intelligence !== undefined ? { intelligence: row.intelligence } : {}),
+			...(row.quota ? { quota: row.quota } : {}),
 			...(unresolved ? { unresolvedId: true } : {}),
 		});
 	}

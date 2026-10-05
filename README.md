@@ -30,6 +30,21 @@ ways during development — an off-peak tooltip leaked into the model name, the
 price column only `N context price bands`, so columns have to be resolved from
 the table header. It is therefore treated as recoverable, not authoritative.
 
+**A second table on that page states request allowances.** `Requests / 5 hours`,
+`/ week` and `/ month` appear in their own table, which `parseQuotaTable` finds by
+its header rather than by position. The two tables share nothing but the display
+name, so the join is on that name — normalised through the same `slugifyModelKey`
+the rest of the module matches on, because storing the raw lowercased name instead
+attached only 13 of the 41 available allowances. Three models state fractional
+counts (`64.7`, `93.3`, `81.4`) where every other row is whole, and those are kept
+verbatim: they double in step with the integer rows, so they are real per-window
+counts rather than thousands. The table covers 41 of the plan's 53 models, and a
+model it omits shows no allowance at all rather than a zero — absent means the
+page said nothing, which is not the same as unlimited. A row whose figures cannot
+all be read is dropped instead of recorded partially, since a model shown a
+5-hour allowance and no weekly one would read as though the weekly limit did not
+exist.
+
 **Ids come from Go-supported sources.** The plan page links models by slug
 (`kimi-k3`) while requests need `moonshotai/Kimi-K3`, and the vendor
 prefix cannot be derived from a slug — a bare slug is refused with

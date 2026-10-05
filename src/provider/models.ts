@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import type {
 	ModelDefinition,
 	PlanPricing,
+	PlanQuota,
 	ReasoningEffort,
 	ThinkingCapability,
 	ThinkingEffort,
@@ -46,7 +47,7 @@ export function toChatInfo(m: ModelDefinition, hasApiKey: boolean): ModelPickerC
 		name: m.name,
 		family: m.family,
 		version: m.version,
-		detail: hasApiKey ? m.detail : t('auth.apiKeyRequiredDetail'),
+		detail: hasApiKey ? modelTagline(m) : t('auth.apiKeyRequiredDetail'),
 		tooltip: hasApiKey ? formatTooltip(m) : t('auth.apiKeyRequiredDetail'),
 		statusIcon: hasApiKey ? undefined : new vscode.ThemeIcon('warning'),
 		maxInputTokens,
@@ -64,6 +65,25 @@ export function toChatInfo(m: ModelDefinition, hasApiKey: boolean): ModelPickerC
 }
 
 /**
+ * Resolve a model's picker tagline in the display language.
+ *
+ * The curated registry stores `detailKey` rather than text so the strings live
+ * in the two dictionaries in `i18n.ts` and can be corrected in either language.
+ * `src/models.ts` cannot do the lookup itself because `i18n.ts` imports the VS
+ * Code API, which the unit tests covering that module do not provide.
+ *
+ * A missing key yields no tagline rather than the raw key: `t()` falls back to
+ * the key itself, which would put `model.detail.gpt-5-6-luna` in front of a user.
+ */
+function modelTagline(m: ModelDefinition): string | undefined {
+	if (m.detailKey) {
+		const translated = t(m.detailKey);
+		return translated === m.detailKey ? undefined : translated;
+	}
+	return m.detail;
+}
+
+/**
  * Build the hover tooltip card shown by Copilot Chat's model picker.
  *
  * Everything here comes from the plan page, so a model whose metadata could not
@@ -77,8 +97,9 @@ export function toChatInfo(m: ModelDefinition, hasApiKey: boolean): ModelPickerC
 function formatTooltip(m: ModelDefinition): string {
 	const sections: string[] = [];
 
-	if (m.detail) {
-		sections.push(m.detail);
+	const tagline = modelTagline(m);
+	if (tagline) {
+		sections.push(tagline);
 	}
 
 	const facts: string[] = [];
@@ -100,11 +121,45 @@ function formatTooltip(m: ModelDefinition): string {
 		sections.push(price);
 	}
 
+	const quota = formatQuota(m.quota);
+	if (quota) {
+		sections.push(quota);
+	}
+
 	if (m.fetched) {
 		sections.push(`${t('tooltip.modelId')}: ${m.id}`);
 	}
 
 	return sections.join('\n\n');
+}
+
+/**
+ * Render the plan page's request allowances.
+ *
+ * Only shown when the page's quota table listed this model. It covers 41 of the
+ * 53 models on the Go plan, so an absent allowance means the page stated
+ * nothing — rendering `0` would claim the model is unusable, which is a different
+ * claim entirely.
+ *
+ * Counts keep the thousands separators the page prints, and fractional figures
+ * are not rounded: three models state `64.7` and `93.3` where every other row is
+ * whole, and those are real per-window counts rather than thousands.
+ */
+function formatQuota(quota: PlanQuota | undefined): string | undefined {
+	if (!quota) {
+		return undefined;
+	}
+	return [
+		t('model.quota'),
+		`${t('model.quotaPerFiveHours')}: ${formatRequestCount(quota.perFiveHours)}`,
+		`${t('model.quotaPerWeek')}: ${formatRequestCount(quota.perWeek)}`,
+		`${t('model.quotaPerMonth')}: ${formatRequestCount(quota.perMonth)}`,
+	].join('\n');
+}
+
+/** Group digits so a four-figure allowance is not read as a bare number. */
+function formatRequestCount(value: number): string {
+	return value.toLocaleString('en-US', { maximumFractionDigits: 1 });
 }
 
 /**
